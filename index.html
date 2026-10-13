@@ -1203,7 +1203,7 @@ window.addEventListener('DOMContentLoaded', () => {
       // Au plus une douzaine de messages par seconde vers les serveurs publics.
       if (!presenceMinuteur) {
         presenceMinuteur = setTimeout(() => { presenceMinuteur = 0; publierPresenceSur(null); },
-          Math.max(0, 80 - (Date.now() - dernierePresence)));
+          Math.max(0, 120 - (Date.now() - dernierePresence)));
       }
       return;
     }
@@ -1328,12 +1328,18 @@ window.addEventListener('DOMContentLoaded', () => {
     const ligne = $('direct');
     ligne.hidden = !partage.actif;
     if (!partage.actif) return;
-    const enLigne = partage.mode !== 'mqtt' || partage.connexions.some(cx => cx.connecte);
+    const joints = partage.connexions.filter(cx => cx.connecte).length;
+    const enLigne = partage.mode !== 'mqtt' || joints > 0;
+    const bloque = !enLigne && !partage.dejaConnecte && Date.now() - (partage.debutConnexion || Date.now()) > 12000;
     ligne.classList.toggle('lecture', partage.lectureSeule || !enLigne);
     $('direct-texte').textContent = partage.lectureSeule ? 'Lecture seule : demande l’accès « Éditeur » pour colorier'
       : enLigne ? 'Dessin partagé, en direct'
       : partage.dejaConnecte ? 'Hors ligne : tes couleurs partiront au retour du réseau'
+      : bloque ? 'Partage bloqué par ce réseau : essaie un autre Wi-Fi ou la 4G'
       : 'Connexion au dessin partagé…';
+    if (partage.mode === 'mqtt') {
+      $('panneau-note').textContent = `Toute personne qui a le lien peut colorier avec toi. Serveurs de partage joints : ${joints} sur ${partage.connexions.length}.`;
+    }
 
     const lignes = personnesConnectees().map(p => {
       const encre = p.isMe ? versHex(couleurCourante) : p.presence && p.presence.c;
@@ -1421,9 +1427,17 @@ window.addEventListener('DOMContentLoaded', () => {
   // Chaque navigateur garde une copie du dessin et renvoie ce qui manque à un serveur
   // qui aurait tout oublié. Toute personne qui a le lien peut colorier.
 
+  // Les deux premiers passent par le port 443 (celui des sites web), rarement bloqué par
+  // les réseaux d'école ou d'entreprise ; les deux autres utilisent des ports spéciaux.
   const SERVEURS = (() => {
     const liste = new URLSearchParams(location.search).get('serveurs');
-    return liste ? liste.split(',').filter(Boolean) : ['wss://broker.emqx.io:8084/mqtt', 'wss://broker.hivemq.com:8884/mqtt'];
+    if (liste) return liste.split(',').filter(Boolean).map(url => ({ url }));
+    return [
+      { url: 'wss://mqtt.eclipseprojects.io:443/mqtt' },
+      { url: 'wss://public.cloud.shiftr.io:443', username: 'public', password: 'public' },
+      { url: 'wss://broker.emqx.io:8084/mqtt' },
+      { url: 'wss://broker.hivemq.com:8884/mqtt' },
+    ];
   })();
   // Un autre dessin commun : ajouter #nom-du-salon à l'adresse.
   const SALON = (() => {
@@ -1470,6 +1484,8 @@ window.addEventListener('DOMContentLoaded', () => {
     envoyerPresence({ c: versHex(couleurCourante), n: monPseudo || null, a: monAuteur });
     majPairsMqtt();
     SERVEURS.forEach(connecterServeur);
+    partage.debutConnexion = Date.now();
+    setTimeout(rendreEquipe, 12500);
     setInterval(() => publierPresenceSur(null), 5000);
     setInterval(nettoyerPairs, 3000);
     window.addEventListener('pagehide', () => {
@@ -1478,12 +1494,13 @@ window.addEventListener('DOMContentLoaded', () => {
     return true;
   }
 
-  function connecterServeur(url) {
-    const cx = { client: null, connecte: false, vus: new Map(), histo: [], reparation: 0, resemis: 0 };
+  function connecterServeur(serveur) {
+    const cx = { client: null, connecte: false, pret: false, vus: new Map(), histo: [], reparation: 0, resemis: 0, histoPrevu: 0 };
     partage.connexions.push(cx);
     try {
-      cx.client = window.mqtt.connect(url, {
+      cx.client = window.mqtt.connect(serveur.url, {
         clientId: monClient + '-' + partage.connexions.length,
+        ...(serveur.username ? { username: serveur.username, password: serveur.password } : {}),
         clean: true, keepalive: 30, reconnectPeriod: 4000, connectTimeout: 10000,
         will: { topic: SUJET + 'p/' + monClient, payload: '{"bye":1}', qos: 0, retain: false },
       });
@@ -1504,6 +1521,7 @@ window.addEventListener('DOMContentLoaded', () => {
       rendreEquipe();
     });
     cx.client.on('close', () => {
+      cx.pret = false;
       if (!cx.connecte) return;
       cx.connecte = false;
       rendreEquipe();
@@ -1522,12 +1540,23 @@ window.addEventListener('DOMContentLoaded', () => {
       if (!Number.isInteger(id) || id < 1 || id > nbZones || !e) return;
       const vu = cx.vus.get(id);
       if (!vu || plusRecent(e, vu)) cx.vus.set(id, e);
-      recevoirZone(id, e);
+      if (recevoirZone(id, e)) {
+        for (const autre of partage.connexions) {
+          const dejaVu = autre.vus.get(id);
+          if (autre !== cx && autre.pret && (!dejaVu || plusRecent(e, dejaVu))) envoyerZone(id, e, autre);
+        }
+      }
     } else if (reste.startsWith('p/')) {
       const qui = reste.slice(2);
       if (qui !== monClient && /^c[a-z0-9]{1,20}$/.test(qui)) recevoirPresence(qui, lireJson(texte));
     } else if (reste === 'chat') {
-      recevoirMessages([lireJson(texte)], true);
+      if (recevoirMessages([lireJson(texte)], true)) {
+        for (const autre of partage.connexions) {
+          if (autre === cx || !autre.pret) continue;
+          autre.client.publish(SUJET + 'chat', texte, { qos: 1 });
+          programmerHistorique(autre);
+        }
+      }
     } else if (reste === 'chat-historique') {
       const v = lireJson(texte);
       if (!v || !Array.isArray(v.messages)) return;
@@ -1545,12 +1574,13 @@ window.addEventListener('DOMContentLoaded', () => {
   let arrivees = [], arriveesPrevues = 0, cachePrevu = 0;
   function recevoirZone(id, e) {
     const actuel = partage.etat.get(id);
-    if (actuel && !plusRecent(e, actuel)) return;
+    if (actuel && !plusRecent(e, actuel)) return false;
     partage.etat.set(id, e);
     if (e.t > partage.horloge) partage.horloge = e.t;
     programmerCache();
     arrivees.push(id);
     if (!arriveesPrevues) arriveesPrevues = setTimeout(viderArrivees, 16);
+    return true;
   }
 
   // Les messages arrivent en rafale à la connexion : on les applique par paquet, en
@@ -1589,11 +1619,25 @@ window.addEventListener('DOMContentLoaded', () => {
   // Renvoie à un serveur les zones qu'il n'a pas (ou dans une version plus ancienne).
   function resemer(cx) {
     if (!cx.connecte) return;
+    cx.pret = true;
     if (manquants(cx.histo, false)) publierHistorique(cx);
+    const aEnvoyer = [];
     for (const [id, e] of partage.etat) {
       const vu = cx.vus.get(id);
-      if (!vu || plusRecent(e, vu)) envoyerZone(id, e, cx);
+      if (!vu || plusRecent(e, vu)) aEnvoyer.push([id, e]);
     }
+    // Par paquets, pour ne pas se faire limiter par les serveurs publics.
+    const paquet = () => {
+      if (!cx.connecte) return;
+      for (const [id, e] of aEnvoyer.splice(0, 40)) envoyerZone(id, e, cx);
+      if (aEnvoyer.length) setTimeout(paquet, 250);
+    };
+    paquet();
+  }
+
+  function programmerHistorique(cx) {
+    clearTimeout(cx.histoPrevu);
+    cx.histoPrevu = setTimeout(() => { if (cx.pret && manquants(cx.histo, false)) publierHistorique(cx); }, 800 + Math.random() * 700);
   }
 
   function programmerCache() {
@@ -1720,13 +1764,14 @@ window.addEventListener('DOMContentLoaded', () => {
       ajoutes++;
       if (!estMoi(msg.u)) desAutres++;
     }
-    if (!ajoutes) return;
+    if (!ajoutes) return 0;
     if (messages.size > 150) for (const msg of derniers(messages.size).slice(0, messages.size - 150)) messages.delete(msg.id);
     rendreChat();
     if (direct && desAutres) {
       if (!chatVisible()) { nonLus += desAutres; majBadge(); }
       sonMessage();
     }
+    return ajoutes;
   }
 
   function rendreChat() {
