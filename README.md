@@ -4,15 +4,21 @@ Coloriage à plusieurs au pot de peinture : on choisit une couleur, on touche un
 remplit, et tout le monde voit les couleurs arriver en direct, avec les curseurs, les pseudos
 des personnes connectées et un tchat.
 
-**Lien à partager :** https://jules125447.github.io/coloriage-jura/
+**Liens à partager :**
 
-Toute personne qui a le lien peut colorier, sans compte. Pour un dessin séparé, ajouter
-`#nom-du-salon` à la fin de l'adresse (lettres minuscules, chiffres et tirets), par exemple
-`https://jules125447.github.io/coloriage-jura/#famille`.
+- Coloriage du Jura : https://jules125447.github.io/coloriage-jura/
+- Libre d'être différents : https://jules125447.github.io/coloriage-jura/#libre
+
+On change de dessin en cliquant sur le titre, en haut à gauche. Chaque dessin a son propre
+dessin partagé et son propre tchat. Toute personne qui a le lien peut colorier, sans compte.
+
+Pour un salon à part (un dessin commun rien qu'à vous), ajouter `#nom-du-salon` à l'adresse
+pour le Jura, ou `#libre.nom-du-salon` pour l'autre dessin (lettres minuscules, chiffres et
+tirets), par exemple `https://jules125447.github.io/coloriage-jura/#libre.famille`.
 
 ## Comment ça marche
 
-- `index.html` contient toute la page (dessin et masque des traits intégrés).
+- `index.html` contient toute la page (les deux dessins et leurs masques de traits intégrés).
 - Le partage passe par quatre serveurs MQTT publics et gratuits, sans compte :
   `mqtt.eclipseprojects.io` et `public.cloud.shiftr.io` (port 443, rarement bloqué),
   `broker.emqx.io` et `broker.hivemq.com`. Un navigateur branché sur plusieurs serveurs
