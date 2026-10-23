@@ -8,6 +8,7 @@ des personnes connectées et un tchat.
 
 - Coloriage du Jura : https://jules125447.github.io/coloriage-jura/
 - Libre d'être différents : https://jules125447.github.io/coloriage-jura/#libre
+- Miss Ariège : https://jules125447.github.io/coloriage-jura/#ariege
 
 On change de dessin en cliquant sur le titre, en haut à gauche. Chaque dessin a son propre
 dessin partagé et son propre tchat. Toute personne qui a le lien peut colorier, sans compte.
@@ -18,7 +19,7 @@ tirets), par exemple `https://jules125447.github.io/coloriage-jura/#libre.famill
 
 ## Comment ça marche
 
-- `index.html` contient toute la page (les deux dessins et leurs masques de traits intégrés).
+- `index.html` contient toute la page (les trois dessins et leurs masques de traits intégrés).
 - Le partage passe par quatre serveurs MQTT publics et gratuits, sans compte :
   `mqtt.eclipseprojects.io` et `public.cloud.shiftr.io` (port 443, rarement bloqué),
   `broker.emqx.io` et `broker.hivemq.com`. Un navigateur branché sur plusieurs serveurs
